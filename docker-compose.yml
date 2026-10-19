@@ -1,0 +1,54 @@
+services:
+  mariadb:
+    image: mariadb:10.11
+    container_name: kamailio_mariadb
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-kamailioroot}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-kamailio}
+      MYSQL_USER: ${MYSQL_USER:-kamailio}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-kamailiopw}
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    networks:
+      - kamailio_net
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  kamailio:
+    build:
+      context: ./kamailio
+      dockerfile: Dockerfile
+    container_name: kamailio_sip
+    restart: unless-stopped
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      - DB_URL=mysql://kamailio:${MYSQL_PASSWORD:-kamailiopw}@mariadb/kamailio
+      - SIP_DOMAIN=${SIP_DOMAIN:-localhost}
+    ports:
+      # Standard SIP
+      - "5060:5060/udp"
+      - "5060:5060/tcp"
+      # WebSockets WSS (Phase 1 & 2: Port 4443)
+      - "4443:4443/tcp"
+      # Plain WS (optional for local non-SSL dev)
+      - "8080:8080/tcp"
+    volumes:
+      - ./kamailio/kamailio.cfg:/etc/kamailio/kamailio.cfg:ro
+      - ./kamailio/tls.cfg:/etc/kamailio/tls.cfg:ro
+      - ${SSL_CERTS_DIR:-./certs}:/etc/kamailio/certs:ro
+    networks:
+      - kamailio_net
+
+volumes:
+  mariadb_data:
+    driver: local
+
+networks:
+  kamailio_net:
+    driver: bridge
